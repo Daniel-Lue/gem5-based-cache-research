@@ -3,6 +3,7 @@
 
 #include <bits/types.h>
 
+#include "base/logging.hh"
 #include "base/types.hh"
 #include "base/trace.hh"
 #include "debug/CacheStore.hh"
@@ -65,6 +66,12 @@ public:
   CacheStore(int s, int E, int b);
 
   ~CacheStore();
+
+  /**
+   * @param block_addr get block address(aligned), and find the content in cache
+   * @return std::pair<gem5::Addr, uint8_t * > bytes stored in block_addr
+  */
+  std::pair<gem5::Addr, uint8_t * > find(Addr block_addr);
 
 };
 
