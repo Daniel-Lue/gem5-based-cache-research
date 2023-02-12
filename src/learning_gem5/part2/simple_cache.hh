@@ -36,6 +36,8 @@
 #include "params/SimpleCache.hh"
 #include "sim/clocked_object.hh"
 
+#include "./CacheStore/cache_store.hh"
+
 namespace gem5
 {
 
