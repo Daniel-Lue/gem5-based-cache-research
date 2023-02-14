@@ -7,6 +7,7 @@
 #include "base/types.hh"
 #include "base/trace.hh"
 #include "debug/CacheStore.hh"
+#include "sim/cur_tick.hh"
 
 typedef __uint64_t uint64_t;
 typedef unsigned char uint8_t;
@@ -72,6 +73,19 @@ public:
    * @return std::pair<gem5::Addr, uint8_t * > bytes stored in block_addr
   */
   std::pair<gem5::Addr, uint8_t * > find(Addr block_addr);
+
+  /**
+   * @param address block address(aligned), the starting address of the block to be stored
+   * @param data the data content of memory to be stored inside the cache
+   * @return none
+  */
+  void set(gem5::Addr address, uint8_t * data);
+
+  /**
+   * @param address for the given address, the function checks whether the corresponding set is full
+   * @return true means the set is full and involves replacement policy
+  */
+  bool isFull(gem5::Addr address);
 
 };
 

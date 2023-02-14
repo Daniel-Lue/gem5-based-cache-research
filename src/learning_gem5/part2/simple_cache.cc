@@ -51,6 +51,16 @@ SimpleCache::SimpleCache(const SimpleCacheParams &params) :
     for (int i = 0; i < params.port_cpu_side_connection_count; ++i) {
         cpuPorts.emplace_back(name() + csprintf(".cpu_side[%d]", i), i, this);
     }
+
+    // calculate the parameters and construct the cache_store object here
+    // blockSize is determined(b), but set number(s) and line number(E) comes from params
+    /// TODO: invocate constructor and set params
+}
+
+SimpleCache::~SimpleCache()
+{
+    // destruct the cache_store object here
+    delete cache_store;
 }
 
 Port &
@@ -338,18 +348,23 @@ SimpleCache::accessTiming(PacketPtr pkt)
     }
 }
 
+/**
+ * Modify the Function: accessFunctional
+ * @param pkt figure out whether the address required by the packet can be found in cache
+ * @return true stands for 'hit'
+*/
 bool
 SimpleCache::accessFunctional(PacketPtr pkt)
 {
     Addr block_addr = pkt->getBlockAddr(blockSize);
-    auto it = cacheStore.find(block_addr);
-    if (it != cacheStore.end()) {
-        if (pkt->isWrite()) {
+    auto it = cache_store->find(block_addr);
+    if (it.second != nullptr) {  // hit
+        if (pkt->isWrite) {
             // Write the data into the block in the cache
-            pkt->writeDataToBlock(it->second, blockSize);
+            pkt->writeDataToBlock(it.second, blockSize);
         } else if (pkt->isRead()) {
             // Read the data out of the cache block into the packet
-            pkt->setDataFromBlock(it->second, blockSize);
+            pkt->setDataFromBlock(it.second, blockSize);
         } else {
             panic("Unknown packet type!");
         }
@@ -364,10 +379,11 @@ SimpleCache::insert(PacketPtr pkt)
     // The packet should be aligned.
     assert(pkt->getAddr() ==  pkt->getBlockAddr(blockSize));
     // The address should not be in the cache
-    assert(cacheStore.find(pkt->getAddr()) == cacheStore.end());
+    assert(cache_store->find(pkt->getAddr()).second == nullptr);
     // The pkt should be a response
     assert(pkt->isResponse());
 
+    /// TODO: complete the replacement policy when CacheStore runs out of space
     if (cacheStore.size() >= capacity) {
         // Select random thing to evict. This is a little convoluted since we
         // are using a std::unordered_map. See http://bit.ly/2hrnLP2
@@ -403,7 +419,7 @@ SimpleCache::insert(PacketPtr pkt)
     uint8_t *data = new uint8_t[blockSize];
 
     // Insert the data and address into the cache store
-    cacheStore[pkt->getAddr()] = data;
+    cache_store->set(pkt->getAddr(), data);
 
     // Write the data into the cache
     pkt->writeDataToBlock(data, blockSize);

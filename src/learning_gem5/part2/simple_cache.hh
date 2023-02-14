@@ -296,6 +296,10 @@ class SimpleCache : public ClockedObject
     /// An incredibly simple cache storage. Maps block addresses to data
     std::unordered_map<Addr, uint8_t*> cacheStore;
 
+    /// introduce CacheStore to replace unordered_map
+    /// remember to construct and destruct the object
+    CacheStore * cache_store;
+
     /// Cache statistics
   protected:
     struct SimpleCacheStats : public statistics::Group
@@ -312,6 +316,10 @@ class SimpleCache : public ClockedObject
     /** constructor
      */
     SimpleCache(const SimpleCacheParams &params);
+
+    /** destructor
+    */
+    ~SimpleCache();
 
     /**
      * Get a port with a given name and index. This is used at
