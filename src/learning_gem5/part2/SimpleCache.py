@@ -41,6 +41,8 @@ class SimpleCache(ClockedObject):
 
     latency = Param.Cycles(1, "Cycles taken on a hit or to resolve a miss")
 
-    size = Param.MemorySize('16kB', "The size of the cache")
-
     system = Param.System(Parent.any, "The system this cache is part of")
+
+    line_per_set = Param.Int(4, "The number of lines in each set of CacheStore")
+
+    param_for_set = Param.Int(2, "The number of sets in CacheStore is: (1 << this->s)")

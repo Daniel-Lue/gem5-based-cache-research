@@ -48,14 +48,20 @@ system.clk_domain.voltage_domain = VoltageDomain()
 system.mem_mode = 'timing'               # Use timing accesses
 system.mem_ranges = [AddrRange('512MB')] # Create an address range
 
+# Set the cache line size of the CacheStore in system
+# only four values are acceptable: 16, 32, 64, 128(Bytes)
+system.cache_line_size = 32
+
 # Create a simple CPU
 system.cpu = TimingSimpleCPU()
 
 # Create a memory bus, a coherent crossbar, in this case
 system.membus = SystemXBar()
 
-# Create a simple cache
-system.cache = SimpleCache(size='1kB')
+# Create a simple cache and Confiure the parameters of the cache
+system.cache = SimpleCache()
+system.cache.line_per_set = 4
+system.cache.param_for_set = 1
 
 # Connect the I and D cache ports of the CPU to the memobj.
 # Since cpu_side is a vector port, each time one of these is connected, it will

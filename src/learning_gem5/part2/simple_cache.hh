@@ -271,9 +271,6 @@ class SimpleCache : public ClockedObject
     /// The block size for the cache
     const unsigned blockSize;
 
-    /// Number of blocks in the cache (size of cache / block size)
-    const unsigned capacity;
-
     /// Instantiation of the CPU-side port
     std::vector<CPUSidePort> cpuPorts;
 
@@ -292,9 +289,6 @@ class SimpleCache : public ClockedObject
 
     /// For tracking the miss latency
     Tick missTime;
-
-    /// An incredibly simple cache storage. Maps block addresses to data
-    std::unordered_map<Addr, uint8_t*> cacheStore;
 
     /// introduce CacheStore to replace unordered_map
     /// remember to construct and destruct the object

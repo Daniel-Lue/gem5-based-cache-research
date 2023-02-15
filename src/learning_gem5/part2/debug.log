@@ -1,0 +1,13 @@
+Global frequency set at 1000000000000 ticks per second
+gem5 Simulator System.  http://gem5.org
+gem5 is copyrighted software; use the --copyright option for details.
+
+gem5 version 21.2.1.1
+gem5 compiled Feb 15 2023 20:45:31
+gem5 started Feb 15 2023 20:56:20
+gem5 executing on daniel-virtual-machine, pid 33339
+command line: build/X86/gem5.opt configs/learning_gem5/part2/simple_cache.py
+
+Beginning simulation!
+Hello world!
+Exiting @ tick 93439000 because exiting with last active thread context

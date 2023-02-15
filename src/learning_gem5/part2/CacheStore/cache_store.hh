@@ -87,6 +87,36 @@ public:
   */
   bool isFull(gem5::Addr address);
 
+  /**
+   * the address should be pre-determined and is not the packet address to be inserted
+   * @param address erase the cache_line with 'address' being the starting Addr of the block
+   * @return none
+  */
+  void erase(gem5::Addr address);
+
+  /**
+   * @param address should be the address of a new packet to be inserted into CacheStore
+   * @return std::pair<gem5::Addr, uint8_t * > the line picked to be replaced
+  */
+  std::pair<gem5::Addr, uint8_t * > pick_line(gem5::Addr address);
+
+  /**
+   * @return combine three parameters into the gem5 address
+  */
+  gem5::Addr combine(uint64_t tag, int set, int block);
+
+  /**
+   * @param lines the set where we choose a cache line from
+   * @return the line number we choose based on the LRU replacement policy
+  */
+  int policy_LRU(cache_line * lines);
+
+  /**
+   * For debugging...
+   * @param set print out the info about all the lines in this set
+  */
+  void print_set(int set);
+
 };
 
 }

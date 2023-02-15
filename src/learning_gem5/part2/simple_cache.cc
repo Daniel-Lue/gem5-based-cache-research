@@ -40,7 +40,6 @@ SimpleCache::SimpleCache(const SimpleCacheParams &params) :
     ClockedObject(params),
     latency(params.latency),
     blockSize(params.system->cacheLineSize()),
-    capacity(params.size / blockSize),
     memPort(params.name + ".mem_side", this),
     blocked(false), originalPacket(nullptr), waitingPortId(-1), stats(this)
 {
@@ -54,7 +53,16 @@ SimpleCache::SimpleCache(const SimpleCacheParams &params) :
 
     // calculate the parameters and construct the cache_store object here
     // blockSize is determined(b), but set number(s) and line number(E) comes from params
-    /// TODO: invocate constructor and set params
+    panic_if(blockSize != 16 && blockSize != 32 && blockSize != 64 && blockSize != 128,
+            "cache line size in bytes should be chosen from one of the four values");
+    int b = -1;  // how many bits in address should be allocated for block
+    unsigned tmp = blockSize;  // considering that blockSize is a constant
+    while (tmp != 0) {
+        b++;
+        tmp = tmp >> 1;
+    }  // when exiting the cycle, 'b' stores bits number needed for block param
+
+    cache_store = new CacheStore(params.param_for_set, params.line_per_set, b);
 }
 
 SimpleCache::~SimpleCache()
@@ -88,9 +96,9 @@ SimpleCache::CPUSidePort::sendPacket(PacketPtr pkt)
     panic_if(blockedPacket != nullptr, "Should never try to send if blocked!");
 
     // If we can't send the packet across the port, store it for later.
-    DPRINTF(SimpleCache, "Sending %s to CPU\n", pkt->print());
+    DPRINTF(CacheStore, "Sending %s to CPU\n", pkt->print());
     if (!sendTimingResp(pkt)) {
-        DPRINTF(SimpleCache, "failed!\n");
+        DPRINTF(CacheStore, "failed!\n");
         blockedPacket = pkt;
     }
 }
@@ -107,7 +115,7 @@ SimpleCache::CPUSidePort::trySendRetry()
     if (needRetry && blockedPacket == nullptr) {
         // Only send a retry if the port is now completely free
         needRetry = false;
-        DPRINTF(SimpleCache, "Sending retry req.\n");
+        DPRINTF(CacheStore, "Sending retry req.\n");
         sendRetryReq();
     }
 }
@@ -122,22 +130,22 @@ SimpleCache::CPUSidePort::recvFunctional(PacketPtr pkt)
 bool
 SimpleCache::CPUSidePort::recvTimingReq(PacketPtr pkt)
 {
-    DPRINTF(SimpleCache, "Got request %s\n", pkt->print());
+    DPRINTF(CacheStore, "Got request %s\n", pkt->print());
 
     if (blockedPacket || needRetry) {
         // The cache may not be able to send a reply if this is blocked
-        DPRINTF(SimpleCache, "Request blocked\n");
+        DPRINTF(CacheStore, "Request blocked\n");
         needRetry = true;
         return false;
     }
     // Just forward to the cache.
     if (!owner->handleRequest(pkt, id)) {
-        DPRINTF(SimpleCache, "Request failed\n");
+        DPRINTF(CacheStore, "Request failed\n");
         // stalling
         needRetry = true;
         return false;
     } else {
-        DPRINTF(SimpleCache, "Request succeeded\n");
+        DPRINTF(CacheStore, "Request succeeded\n");
         return true;
     }
 }
@@ -152,7 +160,7 @@ SimpleCache::CPUSidePort::recvRespRetry()
     PacketPtr pkt = blockedPacket;
     blockedPacket = nullptr;
 
-    DPRINTF(SimpleCache, "Retrying response pkt %s\n", pkt->print());
+    DPRINTF(CacheStore, "Retrying response pkt %s\n", pkt->print());
     // Try to resend it. It's possible that it fails again.
     sendPacket(pkt);
 
@@ -208,7 +216,7 @@ SimpleCache::handleRequest(PacketPtr pkt, int port_id)
         return false;
     }
 
-    DPRINTF(SimpleCache, "Got request for addr %#x\n", pkt->getAddr());
+    DPRINTF(CacheStore, "Got request for addr %#x\n", pkt->getAddr());
 
     // This cache is now blocked waiting for the response to this packet.
     blocked = true;
@@ -229,7 +237,7 @@ bool
 SimpleCache::handleResponse(PacketPtr pkt)
 {
     assert(blocked);
-    DPRINTF(SimpleCache, "Got response for addr %#x\n", pkt->getAddr());
+    DPRINTF(CacheStore, "Got response for addr %#x\n", pkt->getAddr());
 
     // For now assume that inserts are off of the critical path and don't count
     // for any added latency.
@@ -240,7 +248,7 @@ SimpleCache::handleResponse(PacketPtr pkt)
     // If we had to upgrade the request packet to a full cache line, now we
     // can use that packet to construct the response.
     if (originalPacket != nullptr) {
-        DPRINTF(SimpleCache, "Copying data from new packet to old\n");
+        DPRINTF(CacheStore, "Copying data from new packet to old\n");
         // We had to upgrade a previous packet. We can functionally deal with
         // the cache access now. It better be a hit.
         [[maybe_unused]] bool hit = accessFunctional(originalPacket);
@@ -259,7 +267,7 @@ SimpleCache::handleResponse(PacketPtr pkt)
 void SimpleCache::sendResponse(PacketPtr pkt)
 {
     assert(blocked);
-    DPRINTF(SimpleCache, "Sending resp for addr %#x\n", pkt->getAddr());
+    DPRINTF(CacheStore, "Sending resp for addr %#x\n", pkt->getAddr());
 
     int port = waitingPortId;
 
@@ -295,13 +303,13 @@ SimpleCache::accessTiming(PacketPtr pkt)
 {
     bool hit = accessFunctional(pkt);
 
-    DPRINTF(SimpleCache, "%s for packet: %s\n", hit ? "Hit" : "Miss",
+    DPRINTF(CacheStore, "%s for packet: %s\n", hit ? "Hit" : "Miss",
             pkt->print());
 
     if (hit) {
         // Respond to the CPU side
         stats.hits++; // update stats
-        DDUMP(SimpleCache, pkt->getConstPtr<uint8_t>(), pkt->getSize());
+        DDUMP(CacheStore, pkt->getConstPtr<uint8_t>(), pkt->getSize());
         pkt->makeResponse();
         sendResponse(pkt);
     } else {
@@ -315,10 +323,10 @@ SimpleCache::accessTiming(PacketPtr pkt)
         unsigned size = pkt->getSize();
         if (addr == block_addr && size == blockSize) {
             // Aligned and block size. We can just forward.
-            DPRINTF(SimpleCache, "forwarding packet\n");
+            DPRINTF(CacheStore, "forwarding packet\n");
             memPort.sendPacket(pkt);
         } else {
-            DPRINTF(SimpleCache, "Upgrading packet to block size\n");
+            DPRINTF(CacheStore, "Upgrading packet to block size\n");
             panic_if(addr - block_addr + size > blockSize,
                      "Cannot handle accesses that span multiple cache lines");
             // Unaligned access to one cache block
@@ -342,7 +350,7 @@ SimpleCache::accessTiming(PacketPtr pkt)
             // Save the old packet
             originalPacket = pkt;
 
-            DPRINTF(SimpleCache, "forwarding packet\n");
+            DPRINTF(CacheStore, "forwarding packet\n");
             memPort.sendPacket(new_pkt);
         }
     }
@@ -359,7 +367,7 @@ SimpleCache::accessFunctional(PacketPtr pkt)
     Addr block_addr = pkt->getBlockAddr(blockSize);
     auto it = cache_store->find(block_addr);
     if (it.second != nullptr) {  // hit
-        if (pkt->isWrite) {
+        if (pkt->isWrite()) {
             // Write the data into the block in the cache
             pkt->writeDataToBlock(it.second, blockSize);
         } else if (pkt->isRead()) {
@@ -378,42 +386,29 @@ SimpleCache::insert(PacketPtr pkt)
 {
     // The packet should be aligned.
     assert(pkt->getAddr() ==  pkt->getBlockAddr(blockSize));
-    // The address should not be in the cache
-    assert(cache_store->find(pkt->getAddr()).second == nullptr);
     // The pkt should be a response
     assert(pkt->isResponse());
 
-    /// TODO: complete the replacement policy when CacheStore runs out of space
-    if (cacheStore.size() >= capacity) {
-        // Select random thing to evict. This is a little convoluted since we
-        // are using a std::unordered_map. See http://bit.ly/2hrnLP2
-        int bucket, bucket_size;
-        do {
-            bucket = random_mt.random(0, (int)cacheStore.bucket_count() - 1);
-        } while ( (bucket_size = cacheStore.bucket_size(bucket)) == 0 );
-        auto block = std::next(cacheStore.begin(bucket),
-                               random_mt.random(0, bucket_size - 1));
-
-        DPRINTF(SimpleCache, "Removing addr %#x\n", block->first);
+    if (cache_store->isFull(pkt->getAddr())) {
+        auto block = cache_store->pick_line(pkt->getAddr());
+        DPRINTF(CacheStore, "Removing addr %#x\n", block.first);
 
         // Write back the data.
         // Create a new request-packet pair
-        RequestPtr req = std::make_shared<Request>(
-            block->first, blockSize, 0, 0);
-
+        RequestPtr req = std::make_shared<Request>(block.first, blockSize, 0, 0);
         PacketPtr new_pkt = new Packet(req, MemCmd::WritebackDirty, blockSize);
-        new_pkt->dataDynamic(block->second); // This will be deleted later
+        new_pkt->dataDynamic(block.second);
 
-        DPRINTF(SimpleCache, "Writing packet back %s\n", pkt->print());
+        DPRINTF(CacheStore, "Writing packet back %s\n", pkt->print());
         // Send the write to memory
         memPort.sendPacket(new_pkt);
 
         // Delete this entry
-        cacheStore.erase(block->first);
+        cache_store->erase(block.first);
     }
 
-    DPRINTF(SimpleCache, "Inserting %s\n", pkt->print());
-    DDUMP(SimpleCache, pkt->getConstPtr<uint8_t>(), blockSize);
+    DPRINTF(CacheStore, "Inserting %s\n", pkt->print());
+    DDUMP(CacheStore, pkt->getConstPtr<uint8_t>(), blockSize);
 
     // Allocate space for the cache block data
     uint8_t *data = new uint8_t[blockSize];
@@ -428,7 +423,7 @@ SimpleCache::insert(PacketPtr pkt)
 AddrRangeList
 SimpleCache::getAddrRanges() const
 {
-    DPRINTF(SimpleCache, "Sending new ranges\n");
+    DPRINTF(CacheStore, "Sending new ranges\n");
     // Just use the same ranges as whatever is on the memory side.
     return memPort.getAddrRanges();
 }
