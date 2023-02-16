@@ -233,7 +233,6 @@ namespace gem5
   {
     DPRINTF(CacheStore, "Replacement Policy: FIFO...\n");
 
-    int res = 0; // the line number that will be returned to the caller
     auto a = [=](cache_line a, cache_line b)
     { return a.creation_time != 0 ? a.creation_time < b.creation_time : false; };
     return std::distance(lines, std::min_element(lines, lines + this->E, a));
