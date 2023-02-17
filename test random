@@ -1,0 +1,8 @@
+#include<random>
+
+//RANDOM
+int CacheStore::policy_RANDOM()
+{
+  std::random_device rd;
+  return (rd()%(s*E+1));
+}
