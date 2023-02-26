@@ -229,7 +229,7 @@ namespace gem5
     return res;
   }
   // IMPLEMENTATION OF FIFO REPLACEMENT POLICY
-  int policy_FIFO(cache_line *lines)
+  int CacheStore::policy_FIFO(cache_line *lines)
   {
     DPRINTF(CacheStore, "Replacement Policy: FIFO...\n");
 
