@@ -99,7 +99,7 @@ def config_cache(options, system):
             core.HPI_DCache, core.HPI_ICache, core.HPI_L2, None
     else:
         dcache_class, icache_class, l2_cache_class, walk_cache_class = \
-            L1_DCache, L1_ICache, L2Cache, None
+            SimpleCache, SimpleCache, SimpleCache, None
 
         if buildEnv['TARGET_ISA'] in ['x86', 'riscv']:
             walk_cache_class = PageTableWalkerCache
@@ -118,8 +118,7 @@ def config_cache(options, system):
         # Provide a clock for the L2 and the L1-to-L2 bus here as they
         # are not connected using addTwoLevelCacheHierarchy. Use the
         # same clock as the CPUs.
-        system.l2 = l2_cache_class(clk_domain=system.cpu_clk_domain,
-                                   **_get_cache_opts('l2', options))
+        system.l2 = l2_cache_class()
 
         system.tol2bus = L2XBar(clk_domain = system.cpu_clk_domain)
         system.l2.cpu_side = system.tol2bus.mem_side_ports
@@ -130,6 +129,7 @@ def config_cache(options, system):
 
     for i in range(options.num_cpus):
         if options.caches:
+            print(_get_cache_opts('l1i', options))
             icache = icache_class(**_get_cache_opts('l1i', options))
             dcache = dcache_class(**_get_cache_opts('l1d', options))
 

@@ -36,13 +36,29 @@ class SimpleCache(ClockedObject):
 
     # Vector port example. Both the instruction and data ports connect to this
     # port which is automatically split out into two ports.
-    cpu_side = VectorResponsePort("CPU side port, receives requests")
-    mem_side = RequestPort("Memory side port, sends requests")
+    cpu_side = VectorResponsePort(
+     "Upstream port closer to the CPU and/or device")
 
-    latency = Param.Cycles(1, "Cycles taken on a hit or to resolve a miss")
+    mem_side = RequestPort("Downstream port closer to memory")
 
-    system = Param.System(Parent.any, "The system this cache is part of")
+    size=Param.MemorySize('Capacity')
 
-    line_per_set = Param.Int(4, "The number of lines in each set of CacheStore")
+    latency = Param.Cycles(1,
+          "Cycles taken on a hit or to resolve a miss")
 
-    param_for_set = Param.Int(2, "The number of sets in CacheStore is: (1 << this->s)")
+    assoc = Param.Unsigned("Associativity")
+
+    system = Param.System(Parent.any,
+          "The system this cache is part of")
+
+    addr_ranges = VectorParam.AddrRange([AllMemory],
+         "Address range for the CPU-side port (to allow striping)")
+
+    line_per_set = Param.Int(4,
+          "The number of lines in each set of CacheStore")
+
+    prefetcher = Param.BasePrefetcher(NULL,
+          "Prefetcher attached to cache")
+
+    param_for_set = Param.Int(2,
+          "The number of sets in CacheStore is: (1 << this->s)")

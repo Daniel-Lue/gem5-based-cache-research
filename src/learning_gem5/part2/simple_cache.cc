@@ -41,6 +41,7 @@ SimpleCache::SimpleCache(const SimpleCacheParams &params) :
     latency(params.latency),
     blockSize(params.system->cacheLineSize()),
     memPort(params.name + ".mem_side", this),
+    addrRanges(params.addr_ranges.begin(), params.addr_ranges.end()),
     blocked(false), originalPacket(nullptr), waitingPortId(-1), stats(this)
 {
     // Since the CPU side ports are a vector of ports, create an instance of
