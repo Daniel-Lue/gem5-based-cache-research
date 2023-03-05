@@ -103,7 +103,7 @@ bool benchmark(int matrix_size, int **x_matrix, int **y_matrix, int **z_matrix)
 static void *wrapper(void *args)
 {
     thread_arg *obj = (thread_arg *)args;
-    pthread_setname_np(obj->pid, obj->tag);
+    // pthread_setname_np(obj->pid, obj->tag);
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(obj->core_id, &cpuset);
