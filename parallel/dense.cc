@@ -143,11 +143,12 @@ static void * thread_routine(void * arg) {
 
 int main(int argc, char ** argv)
 {
-    // usage: ./dense.out [matrix size] [blocking factor] [threads number]
-    assert(argc == 4);  // then, parse the parameters
+    // usage: ./dense.out [matrix size] [blocking factor] [threads number] [binding]
+    assert(argc == 5);  // then, parse the parameters
     int matrix_size = stoi(argv[1]);
     int blocking_factor = stoi(argv[2]);
     int threads_number = stoi(argv[3]);
+    int binding = stoi(argv[4]);
     assert(matrix_size % blocking_factor == 0);
 
     cout << "=== INPUT ===" << endl;
@@ -215,7 +216,10 @@ int main(int argc, char ** argv)
         // for core binding:
         args[i].run = thread_routine;
         strcpy(args[i].tag, ("id-" + to_string(i)).c_str());
-        args[i].core_id = sysconf(_SC_NPROCESSORS_CONF);  // policy to assign threads to different cores
+        if (binding)
+            args[i].core_id = i % sysconf(_SC_NPROCESSORS_CONF);
+        else
+            args[i].core_id = sysconf(_SC_NPROCESSORS_CONF);  // policy to assign threads to different cores
     }
 
     for (int i = 0; i < threads_number; ++i)
