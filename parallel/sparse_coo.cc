@@ -7,7 +7,15 @@
 #include <stdio.h>
 #include <cstring>
 
+#include <vector>
+
 using namespace std;
+
+// A structure to represent a sparse matrix in COO format
+struct SparseMatrix
+{
+    
+};
 
 pthread_mutex_t mutex;
 
@@ -96,7 +104,7 @@ bool benchmark(int matrix_size, int ** x_matrix, int ** y_matrix, int ** z_matri
 // wrapper in each thread for core binding
 static void * wrapper(void * args) {
     thread_arg * obj = (thread_arg *) args;
-    // pthread_setname_np(obj->pid, obj->tag);
+    pthread_setname_np(obj->pid, obj->tag);
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(obj->core_id, &cpuset);
