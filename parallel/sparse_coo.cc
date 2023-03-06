@@ -14,20 +14,78 @@ using namespace std;
 // A structure to represent a sparse matrix in COO format
 struct SparseMatrix
 {
-    
+    int rows;                // number of rows
+    int cols;                // number of columns
+    int nnz;                 // number of non-zero elements
+    vector<int> row_indices; // row indices of non-zero elements
+    vector<int> col_indices; // column indices of non-zero elements
+    vector<int> values;      // values of non-zero elements
+
+    // Constructor to initialize a sparse matrix with given dimensions and nnz
+    SparseMatrix(int r, int c, int n)
+    {
+        rows = r;
+        cols = c;
+        nnz = n;
+        row_indices.resize(nnz);
+        col_indices.resize(nnz);
+        values.resize(nnz);
+    }
+
+    // A function to print the sparse matrix in COO format
+    void print()
+    {
+        cout << "=== COO_SPARSE_MATRIX ===" << endl;
+
+        cout << "row_indices: ";
+        for (int i = 0; i < nnz; i++)
+            cout << row_indices[i] << " ";
+        cout << endl;
+
+        cout << "col_indices: ";
+        for (int i = 0; i < nnz; i++)
+            cout << col_indices[i] << " ";
+        cout << endl;
+
+        cout << "values: ";
+        for (int i = 0; i < nnz; i++)
+            cout << values[i] << " ";
+        cout << endl << endl;
+    }
 };
+
+SparseMatrix * to_COO(int ** matrix, int matrix_size) {
+    int nnz = 0;
+    for (int i = 0; i < matrix_size; ++i)
+        for (int j = 0; j < matrix_size; ++j)
+            if (matrix[i][j])
+                nnz++;
+    SparseMatrix * res = new SparseMatrix(matrix_size, matrix_size, nnz);  // should be deleted later
+    nnz = 0;
+    for (int i = 0; i < matrix_size; ++i)
+        for (int j = 0; j < matrix_size; ++j)
+            if (matrix[i][j]) {
+                res->row_indices[nnz] = i;
+                res->col_indices[nnz] = j;
+                res->values[nnz] = matrix[i][j];
+                nnz++;
+            }
+    res->print();  // check
+    return res;
+}
+
+void from_COO(int ** matrix, int matrix_size, SparseMatrix * mat_coo) {
+    for (int i = 0; i < mat_coo->nnz; ++i)
+        matrix[mat_coo->row_indices[i]][mat_coo->col_indices[i]] = mat_coo->values[i];
+}
 
 pthread_mutex_t mutex;
 
 typedef struct _thread_arg {
-    int matrix_size;
-    int blocking_factor;
-    int ** x_matrix;
-    int ** y_matrix;
-    int ** z_matrix;  // matrix multiplication
-
-    int blocks_num;
-    int * block_id;  // workload: which blocks the thread should handle
+    SparseMatrix * x_coo;
+    SparseMatrix * y_coo;
+    SparseMatrix * z_coo;
+    int nnz_num_per_thread, thread_id, last;
 
     // for core binding:
     char tag[10];  // thread name(tag)
@@ -36,9 +94,8 @@ typedef struct _thread_arg {
     void * (* run)(void * args);  // thread routine(non-binding part)
 
     _thread_arg() {
-        matrix_size = blocking_factor = blocks_num = 0;
-        x_matrix = y_matrix = z_matrix = nullptr;
-        block_id = nullptr;
+        x_coo = y_coo = z_coo = nullptr;
+        nnz_num_per_thread = thread_id = last = 0;
 
         // for core binding:
         run = nullptr;
@@ -46,14 +103,20 @@ typedef struct _thread_arg {
     };
 } thread_arg;
 
-int ** gen_matrix(int matrix_size)
+int ** gen_matrix(int matrix_size, float sparse_factor)
 {
+    bool flag = false;  // assert that at least one non-zero element can be found
     int ** matrix = new int * [matrix_size];
     for (int i = 0; i < matrix_size; ++i)
         matrix[i] = new int [matrix_size];
     for (int i = 0; i < matrix_size; ++i)
-        for (int j = 0; j < matrix_size; ++j)
-            matrix[i][j] = rand() % 2;
+        for (int j = 0; j < matrix_size; ++j) {
+            float possibility = rand() % 100 / (float) (100);
+            matrix[i][j] = (possibility < sparse_factor);
+            if (possibility < sparse_factor)
+                flag = true;
+        }
+    assert(flag);  // assert that at least one non-zero element can be found
     return matrix;
 }
 
@@ -76,7 +139,7 @@ void print_matrix(int ** matrix, int matrix_size)
 // for correctness
 bool benchmark(int matrix_size, int ** x_matrix, int ** y_matrix, int ** z_matrix)
 {
-    int ** benchmark_matrix = gen_matrix(matrix_size);
+    int ** benchmark_matrix = gen_matrix(matrix_size, 0.5);
     for (int i = 0; i < matrix_size; ++i)
         for (int j = 0; j < matrix_size; ++j) {
             int r = 0;
@@ -116,31 +179,41 @@ static void * wrapper(void * args) {
 
 static void * thread_routine(void * arg) {
     thread_arg * argu = (thread_arg *) arg;  // parse the arguments
-    int matrix_size = argu->matrix_size;
-    int blocking_factor = argu->blocking_factor;
-    int ** x_matrix = argu->x_matrix;
-    int ** y_matrix = argu->y_matrix;
-    int ** z_matrix = argu->z_matrix;
-    int blocks_num = argu->blocks_num;
-    int * block_id = argu->block_id;
+    SparseMatrix * x_coo = argu->x_coo;
+    SparseMatrix * y_coo = argu->y_coo;
+    SparseMatrix * z_coo = argu->z_coo;
+    int nnz_num_per_thread = argu->nnz_num_per_thread;
+    int thread_id = argu->thread_id;
+    int last = argu->last;
 
-    for (int i = 0; i < blocks_num; ++i) {  // each iteration handles one block
-        // calculate the starting row and column: jj, kk
-        int id = block_id[i];
-        int blocks_per_row = matrix_size / blocking_factor;
-        int jj = floor(id / blocks_per_row) * blocking_factor;
-        int kk = (id % blocks_per_row) * blocking_factor;
+    int start = nnz_num_per_thread * thread_id;
+    int end = (last == 1) ? (y_coo->nnz - 1) : (nnz_num_per_thread * (thread_id + 1) - 1);
 
-        for (int i = 0; i < matrix_size; ++i)  // all rows in x_matrix are affected
-            for (int k = kk; k < kk + blocking_factor; k++) {  // update elements in certain columns
-                int r = 0;
-                for (int j = 0; j < blocking_factor; j++)  // number of elements to be added
-                    r += y_matrix[i][jj + j] * z_matrix[jj + j][k];
+    for (int i = start; i <= end; ++i)
+        for (int j = 0; j < z_coo->nnz; ++j)
+            if (y_coo->col_indices[i] == z_coo->row_indices[j]) {
+                int prod = y_coo->values[i] * z_coo->values[j];
+                int row = y_coo->row_indices[i], col = z_coo->col_indices[j];
+
                 pthread_mutex_lock(&mutex);
-                x_matrix[i][k] += r;
-                pthread_mutex_unlock(&mutex);  // fine-grained locks for refinement
+
+                bool found = false;
+                for (int k = 0; k < x_coo->nnz; ++k)
+                    if (x_coo->row_indices[k] == row && x_coo->col_indices[k] == col) {
+                        found = true;
+                        x_coo->values[k] += prod;
+                        break;
+                    }
+                
+                if (!found) {
+                    x_coo->nnz++;
+                    x_coo->row_indices.push_back(row);
+                    x_coo->col_indices.push_back(col);
+                    x_coo->values.push_back(prod);
+                }
+
+                pthread_mutex_unlock(&mutex);
             }
-    }
 
     // to check the correctness of core binding (use top)
     // for (;;)
@@ -151,16 +224,20 @@ static void * thread_routine(void * arg) {
 
 int main(int argc, char ** argv)
 {
-    // usage: ./dense.out [matrix size] [blocking factor] [threads number] [binding]
-    assert(argc == 5);  // then, parse the parameters
+    // usage: ./dense.out [matrix size] [blocking factor] [threads number] [binding] [sparse factor]
+    assert(argc == 6);  // then, parse the parameters
     int matrix_size = stoi(argv[1]);
     int blocking_factor = stoi(argv[2]);
     int threads_number = stoi(argv[3]);
     int binding = stoi(argv[4]);
     assert(matrix_size % blocking_factor == 0);
 
+    // sparse factor input range: 0.01~0.49; if this factor equals 0.50, no sparse effect can be applied
+    float sparse_factor = stod(argv[5]);
+
     cout << "=== INPUT ===" << endl;
-    cout << "matrix size: " << matrix_size << " blocking factor: " << blocking_factor << " threads number: " << threads_number << endl << endl;
+    cout << "matrix size: " << matrix_size << " blocking factor: " << blocking_factor << " threads number: " << threads_number
+         << " binding: " << binding << " sparse factor: " << sparse_factor << endl << endl;
 
     cout << "=== CPU_NUM ===" << endl;
     cout << "system cpu number: " << sysconf(_SC_NPROCESSORS_CONF) << endl << endl;
@@ -169,57 +246,34 @@ int main(int argc, char ** argv)
 
     pthread_mutex_init(&mutex, nullptr);
 
-    int ** y_matrix = gen_matrix(matrix_size);
+    int ** y_matrix = gen_matrix(matrix_size, sparse_factor);
     cout << "=== Y_MATRIX ===" << endl;
     print_matrix(y_matrix, matrix_size);
     cout << endl;
 
-    int ** z_matrix = gen_matrix(matrix_size);
+    int ** z_matrix = gen_matrix(matrix_size, sparse_factor);
     cout << "=== Z_MATRIX ===" << endl;
     print_matrix(z_matrix, matrix_size);
     cout << endl;
 
-    int ** x_matrix = gen_matrix(matrix_size);  // multiplication: X = Y * Z
+    // switch two-dimensional storage to COO
+    SparseMatrix * y_coo = to_COO(y_matrix, matrix_size);
+    SparseMatrix * z_coo = to_COO(z_matrix, matrix_size);
 
-    for (int i = 0; i < matrix_size; ++i)
-        for (int j = 0; j < matrix_size; ++j)
-            x_matrix[i][j] = 0;
+    SparseMatrix * x_coo = new SparseMatrix(matrix_size, matrix_size, 0);
 
-    // sequential implementation:
-
-    // for (int jj = 0; jj < matrix_size; jj += blocking_factor)  // jj: starting row number in blocks of z_matrix
-    //     for (int kk = 0; kk < matrix_size; kk += blocking_factor)  // kk: starting column number in blocks of z_matrix
-    //         for (int i = 0; i < matrix_size; ++i)  // all rows in x_matrix are affected
-    //             for (int k = kk; k < kk + blocking_factor; k++) {  // update elements in certain columns
-    //                 int r = 0;
-    //                 for (int j = 0; j < blocking_factor; j++)  // number of elements to be added
-    //                     r += y_matrix[i][jj + j] * z_matrix[jj + j][k];
-    //                 x_matrix[i][k] += r;
-    //             }
-
-    // parallel implementation:
-
-    int num_of_blocks = (matrix_size / blocking_factor) * (matrix_size / blocking_factor);
-    int blocks_per_thread = floor(num_of_blocks / threads_number);
+    int nnz_per_thread = floor(y_coo->nnz / threads_number);
     thread_arg * args = new thread_arg [threads_number];  // thread argument
 
     // prepare arguments
     for (int i = 0; i < threads_number; ++i) {
-        args[i].matrix_size = matrix_size;
-        args[i].blocking_factor = blocking_factor;
-        args[i].x_matrix = x_matrix;
-        args[i].y_matrix = y_matrix;
-        args[i].z_matrix = z_matrix;
-
-        if (i != threads_number - 1)
-            args[i].blocks_num = blocks_per_thread;
-        else
-            args[i].blocks_num = num_of_blocks - blocks_per_thread * (threads_number - 1);
-        
-        args[i].block_id = new int [args[i].blocks_num];  // then, assign block id to thread
-        for (int j = 0; j < args[i].blocks_num; ++j) {
-            args[i].block_id[j] = i * blocks_per_thread + j;
-        }
+        args[i].x_coo = x_coo;
+        args[i].y_coo = y_coo;
+        args[i].z_coo = z_coo;
+        args[i].thread_id = i;
+        args[i].nnz_num_per_thread = nnz_per_thread;
+        if (i == threads_number - 1)
+            args[i].last = 1;  // marks last thread in the group
 
         // for core binding:
         args[i].run = thread_routine;
@@ -236,12 +290,18 @@ int main(int argc, char ** argv)
     for (int i = 0; i < threads_number; ++i)
         pthread_join(args[i].pid, nullptr);
 
-    for (int i = 0; i < threads_number; ++i)
-        delete [] args[i].block_id;
-
     delete [] args;
 
     pthread_mutex_destroy(&mutex);
+
+    // convert back into the original format
+    int ** x_matrix = gen_matrix(matrix_size, 0.5);  // multiplication: X = Y * Z
+
+    for (int i = 0; i < matrix_size; ++i)
+        for (int j = 0; j < matrix_size; ++j)
+            x_matrix[i][j] = 0;
+
+    from_COO(x_matrix, matrix_size, x_coo);
 
     cout << "=== X_MATRIX ===" << endl;
     print_matrix(x_matrix, matrix_size);
@@ -252,6 +312,10 @@ int main(int argc, char ** argv)
     destructor(x_matrix, matrix_size);
     destructor(y_matrix, matrix_size);
     destructor(z_matrix, matrix_size);
+
+    delete x_coo;
+    delete y_coo;
+    delete z_coo;
 
     return 0;
 }
