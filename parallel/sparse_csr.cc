@@ -12,80 +12,102 @@
 using namespace std;
 
 // A structure to represent a sparse matrix in COO format
-struct SparseMatrix
+struct CsrMatrix
 {
     int rows;                // number of rows
     int cols;                // number of columns
     int nnz;                 // number of non-zero elements
-    vector<int> row_indices; // row indices of non-zero elements
-    vector<int> col_indices; // column indices of non-zero elements
-    vector<int> values;      // values of non-zero elements
 
-    // Constructor to initialize a sparse matrix with given dimensions and nnz
-    SparseMatrix(int r, int c, int n)
+    int * A;                 // values of non-zero elements
+    int * IA;                // indices of the first non-zero element in every row
+    int * JA;                // column number of non-zero elements
+
+    CsrMatrix(int r, int c, int n)
     {
-        rows = r;
-        cols = c;
-        nnz = n;
-        row_indices.resize(nnz);
-        col_indices.resize(nnz);
-        values.resize(nnz);
+        rows = r; cols = c; nnz = n;
+        A = new int [nnz];
+        JA = new int [nnz];
+        IA = new int [rows];
     }
 
-    // A function to print the sparse matrix in COO format
+    ~CsrMatrix()
+    {
+        std::cout << "=== DELETE_CSR_MATRX ===" << endl;
+        delete [] A;
+        delete [] IA;
+        delete [] JA;
+    }
+
+    // A function to print the sparse matrix in CSR format
     void print()
     {
-        cout << "=== COO_SPARSE_MATRIX ===" << endl;
+        std::cout << "=== CSR_SPARSE_MATRIX ===" << endl;
 
-        cout << "row_indices: ";
+        std::cout << "values: ";
         for (int i = 0; i < nnz; i++)
-            cout << row_indices[i] << " ";
-        cout << endl;
+            std::cout << A[i] << " ";
+        std::cout << endl;
 
-        cout << "col_indices: ";
+        std::cout << "col_indices: ";
         for (int i = 0; i < nnz; i++)
-            cout << col_indices[i] << " ";
-        cout << endl;
+            std::cout << JA[i] << " ";
+        std::cout << endl;
 
-        cout << "values: ";
-        for (int i = 0; i < nnz; i++)
-            cout << values[i] << " ";
-        cout << endl << endl;
+        std::cout << "indices of the first non-zero element in every row: " << endl;
+        std::cout << "(which is corresponding to A and JA)" << endl;
+        for (int i = 0; i < rows; i++)
+            std::cout << IA[i] << " ";
+        std::cout << endl << endl;
     }
 };
 
-SparseMatrix * to_COO(int ** matrix, int matrix_size) {
+CsrMatrix * to_CSR(int ** matrix, int matrix_size) {
     int nnz = 0;
     for (int i = 0; i < matrix_size; ++i)
         for (int j = 0; j < matrix_size; ++j)
             if (matrix[i][j])
                 nnz++;
-    SparseMatrix * res = new SparseMatrix(matrix_size, matrix_size, nnz);  // should be deleted later
+
+    CsrMatrix * res = new CsrMatrix(matrix_size, matrix_size, nnz);
+
+    res->IA[0] = 0;  // the first element in IA must be 0
+
     nnz = 0;
     for (int i = 0; i < matrix_size; ++i)
-        for (int j = 0; j < matrix_size; ++j)
+        for (int j = 0; j < matrix_size; ++j) {
             if (matrix[i][j]) {
-                res->row_indices[nnz] = i;
-                res->col_indices[nnz] = j;
-                res->values[nnz] = matrix[i][j];
+                res->A[nnz] = matrix[i][j];
+                res->JA[nnz] = j;
                 nnz++;
             }
+            // update values: indices of the first non-zero element in every row
+            if ((j == matrix_size - 1) && (i != matrix_size - 1))
+                res->IA[i + 1] = nnz;
+        }
+
     res->print();  // check
+    
     return res;
 }
 
-void from_COO(int ** matrix, int matrix_size, SparseMatrix * mat_coo) {
-    for (int i = 0; i < mat_coo->nnz; ++i)
-        matrix[mat_coo->row_indices[i]][mat_coo->col_indices[i]] = mat_coo->values[i];
+void from_CSR(int ** matrix, int matrix_size, CsrMatrix * mat_csr) {
+    int nnz = 0;
+    for (int i = 0; i < mat_csr->rows; ++i)
+        if (i != mat_csr->rows - 1)
+            for ( ; nnz < mat_csr->IA[i + 1]; nnz++)
+                matrix[i][mat_csr->JA[nnz]] = mat_csr->A[nnz];
+        else
+            for ( ; nnz < mat_csr->nnz; nnz++)
+                matrix[i][mat_csr->JA[nnz]] = mat_csr->A[nnz];
 }
 
 pthread_mutex_t mutex;
 
 typedef struct _thread_arg {
-    SparseMatrix * x_coo;
-    SparseMatrix * y_coo;
-    SparseMatrix * z_coo;
-    int nnz_num_per_thread, thread_id, last;
+    CsrMatrix * x_csr;
+    CsrMatrix * y_csr;
+    CsrMatrix * z_csr;
+    int rows_per_thread, thread_id, last;
 
     // for core binding:
     char tag[10];  // thread name(tag)
@@ -94,8 +116,8 @@ typedef struct _thread_arg {
     void * (* run)(void * args);  // thread routine(non-binding part)
 
     _thread_arg() {
-        x_coo = y_coo = z_coo = nullptr;
-        nnz_num_per_thread = thread_id = last = 0;
+        x_csr = y_csr = z_csr = nullptr;
+        rows_per_thread = thread_id = last = 0;
 
         // for core binding:
         run = nullptr;
@@ -131,8 +153,8 @@ void print_matrix(int ** matrix, int matrix_size)
 {
     for (int i = 0; i < matrix_size; ++i) {
         for (int j = 0; j < matrix_size; ++j)
-            cout << matrix[i][j] << " ";
-        cout << endl;
+            std::cout << matrix[i][j] << " ";
+        std::cout << endl;
     }
 }
 
@@ -148,9 +170,9 @@ bool benchmark(int matrix_size, int ** x_matrix, int ** y_matrix, int ** z_matri
             benchmark_matrix[i][j] = r;
         }
 
-    cout << "=== BENCHMARK_MATRIX ===" << endl;
+    std::cout << "=== BENCHMARK_MATRIX ===" << endl;
     print_matrix(benchmark_matrix, matrix_size);
-    cout << endl;
+    std::cout << endl;
 
     for (int i = 0; i < matrix_size; ++i)
         for (int j = 0; j < matrix_size; ++j)
@@ -172,48 +194,37 @@ static void * wrapper(void * args) {
     CPU_ZERO(&cpuset);
     CPU_SET(obj->core_id, &cpuset);
     pthread_setaffinity_np(obj->pid, sizeof(cpu_set_t), &cpuset);
-    cout << obj->tag << " starts running..." << endl;
+    std::cout << obj->tag << " starts running..." << endl;
     obj->run(args);
     return nullptr;
 }
 
 static void * thread_routine(void * arg) {
     thread_arg * argu = (thread_arg *) arg;  // parse the arguments
-    SparseMatrix * x_coo = argu->x_coo;
-    SparseMatrix * y_coo = argu->y_coo;
-    SparseMatrix * z_coo = argu->z_coo;
-    int nnz_num_per_thread = argu->nnz_num_per_thread;
+    CsrMatrix * x_csr = argu->x_csr;
+    CsrMatrix * y_csr = argu->y_csr;
+    CsrMatrix * z_csr = argu->z_csr;
+    int rows_per_thread = argu->rows_per_thread;
     int thread_id = argu->thread_id;
     int last = argu->last;
 
-    int start = nnz_num_per_thread * thread_id;
-    int end = (last == 1) ? (y_coo->nnz - 1) : (nnz_num_per_thread * (thread_id + 1) - 1);
+    int start = rows_per_thread * thread_id;
+    int end = (last == 1) ? (y_csr->rows - 1) : (rows_per_thread * (thread_id + 1) - 1);
 
-    for (int i = start; i <= end; ++i)
-        for (int j = 0; j < z_coo->nnz; ++j)
-            if (y_coo->col_indices[i] == z_coo->row_indices[j]) {
-                int prod = y_coo->values[i] * z_coo->values[j];
-                int row = y_coo->row_indices[i], col = z_coo->col_indices[j];
+    x_csr->rows = x_csr->cols = y_csr->rows;
+    x_csr->nnz = 0;
 
-                pthread_mutex_lock(&mutex);
+    // x_csr(before invocation of thread_routine):
+    // int * tmp_a = new int [y_csr->nnz * z_csr->nnz];
+    // int * tmp_ia = new int [y_csr->rows + 1];
+    // int * tmp_ja = new int [y_csr->nnz * z_csr->nnz];
 
-                bool found = false;
-                for (int k = 0; k < x_coo->nnz; ++k)
-                    if (x_coo->row_indices[k] == row && x_coo->col_indices[k] == col) {
-                        found = true;
-                        x_coo->values[k] += prod;
-                        break;
-                    }
-                
-                if (!found) {
-                    x_coo->nnz++;
-                    x_coo->row_indices.push_back(row);
-                    x_coo->col_indices.push_back(col);
-                    x_coo->values.push_back(prod);
-                }
-
-                pthread_mutex_unlock(&mutex);
-            }
+    for (int i = start; i <= end; ++i) {
+        x_csr->IA[i] = x_csr->nnz;
+        for (int j = 0; j < z_csr->cols; ++j) {
+            
+        }
+    }
 
     // to check the correctness of core binding (use top)
     // for (;;)

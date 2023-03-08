@@ -41,14 +41,20 @@ typedef struct _thread_arg
     };
 } thread_arg;
 
-int **gen_matrix(int matrix_size)
+int ** gen_matrix(int matrix_size, float sparse_factor)
 {
-    int **matrix = new int *[matrix_size];
+    bool flag = false;  // assert that at least one non-zero element can be found
+    int ** matrix = new int * [matrix_size];
     for (int i = 0; i < matrix_size; ++i)
-        matrix[i] = new int[matrix_size];
+        matrix[i] = new int [matrix_size];
     for (int i = 0; i < matrix_size; ++i)
-        for (int j = 0; j < matrix_size; ++j)
-            matrix[i][j] = rand() % 2;
+        for (int j = 0; j < matrix_size; ++j) {
+            float possibility = rand() % 100 / (float) (100);
+            matrix[i][j] = (possibility < sparse_factor);
+            if (possibility < sparse_factor)
+                flag = true;
+        }
+    assert(flag);  // assert that at least one non-zero element can be found
     return matrix;
 }
 
@@ -72,7 +78,7 @@ void print_matrix(int **matrix, int matrix_size)
 // for correctness
 bool benchmark(int matrix_size, int **x_matrix, int **y_matrix, int **z_matrix)
 {
-    int **benchmark_matrix = gen_matrix(matrix_size);
+    int **benchmark_matrix = gen_matrix(matrix_size, 0.5);
     for (int i = 0; i < matrix_size; ++i)
         for (int j = 0; j < matrix_size; ++j)
         {
@@ -103,10 +109,15 @@ bool benchmark(int matrix_size, int **x_matrix, int **y_matrix, int **z_matrix)
 static void *wrapper(void *args)
 {
     thread_arg *obj = (thread_arg *)args;
-    // pthread_setname_np(obj->pid, obj->tag);
+
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(obj->core_id, &cpuset);
+    if (obj->core_id == sysconf(_SC_NPROCESSORS_CONF))  // no binding
+        for (int i = 1; i < sysconf(_SC_NPROCESSORS_CONF); ++i)
+            CPU_SET(i, &cpuset);
+    else  // binding
+        CPU_SET(obj->core_id, &cpuset);
+
     pthread_setaffinity_np(obj->pid, sizeof(cpu_set_t), &cpuset);
     cout << obj->tag << " starts running..." << endl;
     obj->run(args);
@@ -153,6 +164,7 @@ static void *thread_routine(void *arg)
 
     return NULL;
 }
+
 int stoi(char *a)
 {
     stringstream b(a);
@@ -160,41 +172,47 @@ int stoi(char *a)
     b >> x;
     return x;
 }
+
 int main(int argc, char **argv)
 {
-    // usage: ./dense.out [matrix size] [blocking factor] [threads number] [binding]
-    assert(argc == 5); // then, parse the parameters
+    // bind main thread to core0 anyway
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(0, &cpuset);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+
+    // usage: ./dense.out [matrix size] [blocking factor] [threads number] [binding] [sparse factor]
+    assert(argc == 6); // then, parse the parameters
     int matrix_size = stoi(argv[1]);
     int blocking_factor = stoi(argv[2]);
     int threads_number = stoi(argv[3]);
     int binding = stoi(argv[4]);
     assert(matrix_size % blocking_factor == 0);
 
+    float sparse_factor = stod(argv[5]);
+
     cout << "=== INPUT ===" << endl;
-    cout << "matrix size: " << matrix_size << " blocking factor: "
-         << blocking_factor
-         << " threads number: " << threads_number << endl
-         << endl;
+    cout << "matrix size: " << matrix_size << " blocking factor: " << blocking_factor << " threads number: " << threads_number
+         << " binding: " << binding << " sparse factor: " << sparse_factor << endl << endl;
 
     cout << "=== CPU_NUM ===" << endl;
-    cout << "system cpu number: " << sysconf(_SC_NPROCESSORS_CONF) << endl
-         << endl;
+    cout << "system cpu number: " << sysconf(_SC_NPROCESSORS_CONF) << endl << endl;
 
     srand(time(NULL)); // matrix elements are random
 
     pthread_mutex_init(&mutex, NULL);
 
-    int **y_matrix = gen_matrix(matrix_size);
+    int **y_matrix = gen_matrix(matrix_size, sparse_factor);
     cout << "=== Y_MATRIX ===" << endl;
     print_matrix(y_matrix, matrix_size);
     cout << endl;
 
-    int **z_matrix = gen_matrix(matrix_size);
+    int **z_matrix = gen_matrix(matrix_size, sparse_factor);
     cout << "=== Z_MATRIX ===" << endl;
     print_matrix(z_matrix, matrix_size);
     cout << endl;
 
-    int **x_matrix = gen_matrix(matrix_size); // multiplication: X = Y * Z
+    int **x_matrix = gen_matrix(matrix_size, sparse_factor); // multiplication: X = Y * Z
 
     for (int i = 0; i < matrix_size; ++i)
         for (int j = 0; j < matrix_size; ++j)
@@ -246,10 +264,9 @@ int main(int argc, char **argv)
         t << i;
         strcpy(args[i].tag, ("id-" + x).c_str());
         if (binding)
-            args[i].core_id = i % sysconf(_SC_NPROCESSORS_CONF);
+            args[i].core_id = i % (sysconf(_SC_NPROCESSORS_CONF) - 1) + 1;
         else
             args[i].core_id = sysconf(_SC_NPROCESSORS_CONF);
-        // policy to assign threads to different cores
     }
 
     for (int i = 0; i < threads_number; ++i)

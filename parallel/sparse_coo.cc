@@ -232,7 +232,6 @@ int main(int argc, char ** argv)
     int binding = stoi(argv[4]);
     assert(matrix_size % blocking_factor == 0);
 
-    // sparse factor input range: 0.01~0.49; if this factor equals 0.50, no sparse effect can be applied
     float sparse_factor = stod(argv[5]);
 
     cout << "=== INPUT ===" << endl;
